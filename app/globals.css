@@ -24,3 +24,23 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* --- SPECIFIC CLERK DARK MODE OVERRIDES --- */
+
+/* 1. Only turn the text white when it is inside the sidebar trigger button */
+.cl-organizationSwitcherTrigger .cl-organizationPreviewMainIdentifier {
+  color: #ffffff !important;
+}
+
+/* 2. Forces the dropdown arrow icon to be white on the sidebar */
+.cl-organizationSwitcherTrigger .cl-organizationSwitcherTriggerIcon {
+  color: #ffffff !important;
+  opacity: 0.7 !important;
+}
+
+/* 3. Ensures the text inside the white popover card remains readable */
+.cl-organizationSwitcherPopoverCard .cl-organizationPreviewMainIdentifier,
+.cl-organizationSwitcherPopoverCard
+  .cl-organizationSwitcherPopoverActionButtonText {
+  color: #0f172a !important; /* Forces dark slate color inside the popup */
+}
