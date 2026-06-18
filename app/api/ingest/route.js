@@ -1,61 +1,46 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import pdf from 'pdf-parse-fork';
-import { pipeline } from '@xenova/transformers';
-import { auth } from '@clerk/nextjs/server'; // Import Clerk Auth
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { auth } from '@clerk/nextjs/server';
 
 export async function POST(req) {
     try {
-        // 1. SECURE AUTH CHECK
         const { orgId, orgRole } = await auth();
-
-        // Security logic: Ensure user is logged in
-        if (!orgId) {
-            return NextResponse.json({ error: "Unauthorized: You must be part of an organization." }, { status: 401 });
-        }
-
-        // Only allow Admins to upload knowledge to the company bank
-        if (orgRole !== 'org:admin') {
-            return NextResponse.json({ error: "Forbidden: Only Admins can modify the Knowledge Base." }, { status: 403 });
-        }
+        if (!orgId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (orgRole !== 'org:admin') return NextResponse.json({ error: "Admin only" }, { status: 403 });
 
         const formData = await req.formData();
         const file = formData.get('file');
-
-        if (!file) {
-            return NextResponse.json({ error: "No file provided" }, { status: 400 });
-        }
-
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // 2. Parse PDF
+        // 1. Parse PDF (Fast)
         const data = await pdf(buffer);
+        const text = data.text;
 
-        // 3. Initialize Local AI (Free)
-        const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        // 2. Setup Google AI (No heavy model downloading!)
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+        // text-embedding-004 is Google's high-speed, free embedding model
+        const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
 
-        const chunks = data.text.split('\n\n').filter(c => c.length > 50);
+        const chunks = text.split('\n\n').filter(c => c.length > 50);
 
-        // 4. Save chunks with the REAL orgId and filename
         for (const chunk of chunks) {
-            const output = await extractor(chunk, { pooling: 'mean', normalize: true });
+            // 3. Generate embedding via Google's cloud API (Super fast & free)
+            const result = await embedModel.embedContent(chunk);
+            const embedding = result.embedding.values; // Returns a 768-dim array
 
-            const { error } = await supabase.from('documents').insert({
+            await supabase.from('documents').insert({
                 content: chunk,
-                embedding: Array.from(output.data),
-                org_id: orgId,      // Secure Org ID from Clerk
-                filename: file.name // <--- NEW: Saves the file name (e.g. "Resume_Jishnu.pdf")
+                embedding: embedding,
+                org_id: orgId,
+                filename: file.name
             });
-
-            if (error) {
-                console.error("Supabase error:", error.message);
-            }
         }
 
-        return NextResponse.json({ message: "Knowledge successfully indexed for your organization." });
-
+        return NextResponse.json({ message: "Done" });
     } catch (e) {
-        console.error("Ingest Error:", e);
+        console.error(e);
         return NextResponse.json({ error: e.message }, { status: 500 });
     }
 }
