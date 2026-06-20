@@ -41,6 +41,15 @@ export default function EnterpriseChat() {
     }
   }, [messages, loading]);
 
+  // --- 🔒 SECURITY EFFECT: CLEAR CHAT ON SESSION CHANGE ---
+  // This ensures that if User A signs out and User B signs in, 
+  // User B can NEVER see the previous user's chat messages.
+  useEffect(() => {
+    setMessages([]);
+    setInput('');
+    console.log("🔒 SECURITY: Session changed. Chat history wiped from browser memory.");
+  }, [orgId, userId]);
+
   // Fetch real file list from Supabase
   const fetchFiles = async () => {
     if (!orgId) return;
@@ -157,17 +166,14 @@ export default function EnterpriseChat() {
           <OrganizationSwitcher
             hidePersonal
             appearance={{
-              // This tells Clerk's core style engine to force these colors
               variables: {
-                colorText: '#ffffff',             // Forces all text to be pure white
-                colorTextSecondary: '#94a3b8',    // Forces secondary text to be light gray
-                colorBackground: '#161b29',       // Background for dropdown menu
+                colorText: '#ffffff',
+                colorTextSecondary: '#94a3b8',
+                colorBackground: '#161b29',
               },
               elements: {
-                // This styles the main button container
-                organizationSwitcherTrigger: "text-white w-full justify-between bg-white/5 border border-white/10 hover:bg-white/10 transition-all px-3 py-2 rounded-xl",
-                // Forces the arrow icon to be white
-                organizationSwitcherTriggerIcon: "text-white opacity-70"
+                organizationSwitcherTrigger: "text-white w-full justify-between bg-white/5 border border-white/10 hover:bg-white/10 transition-all px-4 py-2.5 rounded-xl",
+                organizationPreviewTriggerIcon: "text-white opacity-70"
               }
             }}
           />
@@ -192,7 +198,23 @@ export default function EnterpriseChat() {
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase px-2 mb-2 tracking-widest">Workspace</p>
             <div className="bg-white/5 p-1 rounded-xl border border-white/10">
-              <OrganizationSwitcher hidePersonal appearance={{ elements: { organizationSwitcherTrigger: "text-white w-full justify-between" } }} />
+              {/* --- FIXED: Styled sidebar switcher to force text white --- */}
+              <OrganizationSwitcher
+                hidePersonal
+                appearance={{
+                  variables: {
+                    colorText: '#ffffff',
+                    colorTextSecondary: '#94a3b8',
+                    colorBackground: '#161b29',
+                  },
+                  elements: {
+                    organizationSwitcherTrigger: "text-white w-full justify-between bg-white/5 border border-white/10 hover:bg-white/10 transition-all px-3 py-2 rounded-xl",
+                    organizationPreviewTextContainer: "text-white",
+                    organizationPreviewMainIdentifier: "text-white font-medium text-sm",
+                    organizationSwitcherTriggerIcon: "text-white opacity-70"
+                  }
+                }}
+              />
             </div>
           </div>
 

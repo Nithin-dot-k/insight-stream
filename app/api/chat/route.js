@@ -10,23 +10,24 @@ export async function POST(req) {
         const { messages } = await req.json();
         const lastMessage = messages[messages.length - 1].content;
 
-        // 1. Generate query vector using Hugging Face (768-dim)
-        const hfRes = await fetch(
-            "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2",
-            {
-                headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
-                method: "POST",
-                body: JSON.stringify({ inputs: lastMessage }),
-            }
-        );
+        // Generate query vector using Cohere (1024-dim)
+        const cohereRes = await fetch("https://api.cohere.com/v1/embed", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.COHERE_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                texts: [lastMessage],
+                model: "embed-english-v3.0",
+                input_type: "search_query"
+            })
+        });
 
-        const vector = await hfRes.json();
+        const cohereData = await cohereRes.json();
+        const vector = cohereData.embeddings[0];
 
-        if (!Array.isArray(vector)) {
-            throw new Error("Hugging Face query vectorization failed.");
-        }
-
-        // 2. Search Supabase
+        // Search Supabase
         const { data: chunks, error: dbError } = await supabase.rpc('match_documents', {
             query_embedding: vector,
             match_threshold: 0.01,
@@ -37,7 +38,7 @@ export async function POST(req) {
         if (dbError) throw dbError;
         const context = chunks && chunks.length > 0 ? chunks.map(c => c.content).join("\n\n") : "Empty context.";
 
-        // 3. Call Groq with Llama 3.1
+        // Call Groq with Llama 3.1
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {

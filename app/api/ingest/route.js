@@ -13,32 +13,35 @@ export async function POST(req) {
         const file = formData.get('file');
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // 1. Parse PDF
         const data = await pdf(buffer);
         const chunks = data.text.split('\n\n').filter(c => c.length > 50);
 
-        // 2. Generate Embeddings using Hugging Face (Free, 768-dimensions)
-        for (const chunk of chunks) {
-            const hfRes = await fetch(
-                "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2",
-                {
-                    headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
-                    method: "POST",
-                    body: JSON.stringify({ inputs: chunk }),
-                }
-            );
+        // Call Cohere API (1024 dimensions, highly stable DNS)
+        const cohereRes = await fetch("https://api.cohere.com/v1/embed", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${process.env.COHERE_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                texts: chunks,
+                model: "embed-english-v3.0",
+                input_type: "search_document"
+            })
+        });
 
-            const embedding = await hfRes.json();
+        const cohereData = await cohereRes.json();
+        const embeddings = cohereData.embeddings; // Array of 1024-dim arrays
 
-            if (!Array.isArray(embedding)) {
-                console.error("HF Error:", embedding);
-                throw new Error("Hugging Face failed to return a vector.");
-            }
+        if (!embeddings || embeddings.length === 0) {
+            throw new Error("Cohere failed to generate embeddings.");
+        }
 
-            // Save to Supabase (768-dim)
+        // Save chunks to Supabase
+        for (let i = 0; i < chunks.length; i++) {
             await supabase.from('documents').insert({
-                content: chunk,
-                embedding: embedding,
+                content: chunks[i],
+                embedding: embeddings[i],
                 org_id: orgId,
                 filename: file.name
             });
