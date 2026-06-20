@@ -17,40 +17,38 @@ import {
   Terminal,
   Activity,
   Shield,
-  Trash2
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function EnterpriseChat() {
-  // 1. SECURE ACCESS HOOKS
   const { isLoaded, userId, orgId, orgRole } = useAuth();
   const { organization } = useOrganization();
 
-  // 2. STATE MANAGEMENT
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [filesList, setFilesList] = useState([]);
 
+  // --- NEW MODAL STATES (Replaces browser popups) ---
+  const [fileToDelete, setFileToDelete] = useState(null); // Stores file name being deleted
+  const [showPurgeModal, setShowPurgeModal] = useState(false); // Handles full database purge warning
+
   const scrollRef = useRef(null);
 
-  // Auto-scroll effect
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
 
-  // --- 🔒 SECURITY EFFECT: CLEAR CHAT ON SESSION CHANGE ---
-  // This ensures that if User A signs out and User B signs in, 
-  // User B can NEVER see the previous user's chat messages.
+  // Session-Change Security Listener
   useEffect(() => {
     setMessages([]);
     setInput('');
-    console.log("🔒 SECURITY: Session changed. Chat history wiped from browser memory.");
   }, [orgId, userId]);
 
-  // Fetch real file list from Supabase
   const fetchFiles = async () => {
     if (!orgId) return;
     try {
@@ -66,7 +64,6 @@ export default function EnterpriseChat() {
     fetchFiles();
   }, [orgId, uploading]);
 
-  // 3. ACTION HANDLERS
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -81,7 +78,7 @@ export default function EnterpriseChat() {
           role: 'system',
           content: `Neural Link: "${file.name}" indexed successfully.`
         }]);
-        fetchFiles(); // Refresh sidebar list
+        fetchFiles();
       }
     } catch (err) {
       console.error(err);
@@ -90,17 +87,34 @@ export default function EnterpriseChat() {
     }
   };
 
-  const handleDeleteFile = async (filename) => {
-    if (orgRole !== 'org:admin') return alert("Admin rights required.");
-    if (!confirm(`Delete "${filename}" from database memory?`)) return;
+  // --- NEW SOLID DELETE FUNCTION (No browser alert) ---
+  const handleDeleteFile = async () => {
+    if (!fileToDelete) return;
+    setUploading(true);
+    const target = fileToDelete;
+    setFileToDelete(null); // Close modal immediately for smooth UI
 
     try {
-      setUploading(true);
-      const res = await fetch(`/api/delete-file?filename=${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/delete-file?filename=${encodeURIComponent(target)}`, { method: 'DELETE' });
       if (res.ok) {
-        setMessages(prev => [...prev, { role: 'system', content: `SYSTEM: "${filename}" removed from memory.` }]);
-        fetchFiles(); // Refresh sidebar list
+        setMessages(prev => [...prev, { role: 'system', content: `SYSTEM: "${target}" removed from memory.` }]);
+        fetchFiles();
       }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // --- NEW SOLID PURGE FUNCTION (No browser alert) ---
+  const handlePurgeMemory = async () => {
+    setShowPurgeModal(false); // Close modal
+    setUploading(true);
+    try {
+      await fetch('/api/purge', { method: 'DELETE' });
+      setMessages([{ role: 'system', content: "SYSTEM: Memory bank purged by administrator." }]);
+      fetchFiles();
     } catch (err) {
       console.error(err);
     } finally {
@@ -133,11 +147,10 @@ export default function EnterpriseChat() {
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: "Neural Link Offline." }]);
     } finally {
-      setLoading(false); // Shuts off "Thinking..." state
+      setLoading(false);
     }
   };
 
-  // 4. RENDER GUARDS
   if (!isLoaded) return <div className="h-screen bg-[#0B0F1A] flex items-center justify-center text-blue-500 font-mono">LOADING_SESSION...</div>;
 
   if (!userId) {
@@ -161,7 +174,6 @@ export default function EnterpriseChat() {
           Initialize a secure organization workspace to continue.
         </p>
 
-        {/* We removed the white box and styled the switcher for dark mode */}
         <div className="p-1 min-w-[250px]">
           <OrganizationSwitcher
             hidePersonal
@@ -185,7 +197,7 @@ export default function EnterpriseChat() {
   const isAdmin = orgRole === 'org:admin';
 
   return (
-    <div className="flex h-screen bg-[#0B0F1A] text-slate-200 font-sans">
+    <div className="flex h-screen bg-[#0B0F1A] text-slate-200 font-sans relative">
 
       {/* --- SIDEBAR --- */}
       <aside className="w-64 border-r border-white/5 bg-[#0d111c] hidden md:flex flex-col p-4 z-30">
@@ -198,7 +210,6 @@ export default function EnterpriseChat() {
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase px-2 mb-2 tracking-widest">Workspace</p>
             <div className="bg-white/5 p-1 rounded-xl border border-white/10">
-              {/* --- FIXED: Styled sidebar switcher to force text white --- */}
               <OrganizationSwitcher
                 hidePersonal
                 appearance={{
@@ -218,7 +229,6 @@ export default function EnterpriseChat() {
             </div>
           </div>
 
-          {/* DYNAMIC MEMORY BANK (Reads files from Supabase) */}
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase px-2 mb-2 tracking-widest">Memory Bank</p>
             <div className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar px-1">
@@ -233,7 +243,7 @@ export default function EnterpriseChat() {
                     </div>
                     {isAdmin && (
                       <button
-                        onClick={() => handleDeleteFile(filename)}
+                        onClick={() => setFileToDelete(filename)} // Trigger Custom Modal
                         className="text-slate-500 hover:text-red-500 p-0.5 rounded transition-colors"
                         title="Delete file"
                       >
@@ -258,6 +268,15 @@ export default function EnterpriseChat() {
               </div>
             </div>
           </div>
+
+          {isAdmin && (
+            <button
+              onClick={() => setShowPurgeModal(true)} // Trigger Custom Purge Modal
+              className="w-full flex items-center gap-2 p-3 text-[10px] text-red-500 hover:bg-red-500/10 rounded-xl border border-red-500/10 transition-all"
+            >
+              <Trash2 size={12} /> PURGE ORG MEMORY
+            </button>
+          )}
         </div>
 
         <div className="pt-4 border-t border-white/5 text-[10px] text-slate-600 flex justify-between items-center">
@@ -311,6 +330,67 @@ export default function EnterpriseChat() {
           </div>
         </form>
       </main>
+
+      {/* --- 🛡️ CUSTOM BADASS WARNING MODALS (Renders over everything) --- */}
+
+      {/* 1. Delete Individual File Modal */}
+      {fileToDelete && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#121624] border border-red-500/20 max-w-sm w-full rounded-2xl p-6 shadow-[0_0_50px_rgba(239,68,68,0.1)] text-center space-y-4 animate-in duration-200">
+            <div className="w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-full flex items-center justify-center mx-auto text-red-500">
+              <AlertTriangle size={24} />
+            </div>
+            <h3 className="text-lg font-bold text-white uppercase tracking-tighter">Decommission Memory?</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              Are you sure you want to permanently delete <span className="text-red-400 font-mono">"{fileToDelete}"</span> from organizational memory?
+            </p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setFileToDelete(null)}
+                className="flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-xs font-semibold hover:bg-white/10 transition-all"
+              >
+                Abort
+              </button>
+              <button
+                onClick={handleDeleteFile}
+                className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+              >
+                Confirm Purge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. Wipe All Memory Modal */}
+      {showPurgeModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-[#121624] border-2 border-red-500 max-w-md w-full rounded-2xl p-8 shadow-[0_0_50px_rgba(239,68,68,0.3)] text-center space-y-4 animate-in duration-300">
+            <div className="w-14 h-14 bg-red-500/20 border-2 border-red-500 rounded-full flex items-center justify-center mx-auto text-red-500 animate-pulse">
+              <AlertTriangle size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-white uppercase tracking-widest">CRITICAL WARNING</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              You are about to execute a <span className="text-red-500 font-bold">TOTAL MEMORY WIPE</span> for <span className="text-white font-mono font-bold">"{organization?.name}"</span>. This will destroy all indexed documents and vector files permanently. This action cannot be reversed.
+            </p>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => setShowPurgeModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-all"
+              >
+                Cancel Override
+              </button>
+              <button
+                onClick={handlePurgeMemory}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-[0_0_20px_rgba(239,68,68,0.4)]"
+              >
+                Execute Purge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx global>{` .custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; } `}</style>
     </div>
   );
