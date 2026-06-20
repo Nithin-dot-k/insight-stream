@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { auth } from '@clerk/nextjs/server';
 
 export async function POST(req) {
@@ -11,12 +10,21 @@ export async function POST(req) {
         const { messages } = await req.json();
         const lastMessage = messages[messages.length - 1].content;
 
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+        // 1. Generate query vector using Hugging Face (768-dim)
+        const hfRes = await fetch(
+            "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2",
+            {
+                headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
+                method: "POST",
+                body: JSON.stringify({ inputs: lastMessage }),
+            }
+        );
 
-        // 1. Generate query vector using Google's Cloud model (768-dim)
-        const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-        const embedResult = await embedModel.embedContent(lastMessage);
-        const vector = embedResult.embedding.values;
+        const vector = await hfRes.json();
+
+        if (!Array.isArray(vector)) {
+            throw new Error("Hugging Face query vectorization failed.");
+        }
 
         // 2. Search Supabase
         const { data: chunks, error: dbError } = await supabase.rpc('match_documents', {
@@ -30,11 +38,10 @@ export async function POST(req) {
         const context = chunks && chunks.length > 0 ? chunks.map(c => c.content).join("\n\n") : "Empty context.";
 
         // 3. Call Groq with Llama 3.1
-        const groqApiKey = process.env.GROQ_API_KEY;
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${groqApiKey}`,
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({

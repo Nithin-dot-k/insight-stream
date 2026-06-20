@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import pdf from 'pdf-parse-fork';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { auth } from '@clerk/nextjs/server';
 
 export async function POST(req) {
@@ -14,22 +13,29 @@ export async function POST(req) {
         const file = formData.get('file');
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // 1. Parse PDF (Fast)
+        // 1. Parse PDF
         const data = await pdf(buffer);
-        const text = data.text;
+        const chunks = data.text.split('\n\n').filter(c => c.length > 50);
 
-        // 2. Setup Google AI (No heavy model downloading!)
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY);
-        // text-embedding-004 is Google's high-speed, free embedding model
-        const embedModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-
-        const chunks = text.split('\n\n').filter(c => c.length > 50);
-
+        // 2. Generate Embeddings using Hugging Face (Free, 768-dimensions)
         for (const chunk of chunks) {
-            // 3. Generate embedding via Google's cloud API (Super fast & free)
-            const result = await embedModel.embedContent(chunk);
-            const embedding = result.embedding.values; // Returns a 768-dim array
+            const hfRes = await fetch(
+                "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2",
+                {
+                    headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
+                    method: "POST",
+                    body: JSON.stringify({ inputs: chunk }),
+                }
+            );
 
+            const embedding = await hfRes.json();
+
+            if (!Array.isArray(embedding)) {
+                console.error("HF Error:", embedding);
+                throw new Error("Hugging Face failed to return a vector.");
+            }
+
+            // Save to Supabase (768-dim)
             await supabase.from('documents').insert({
                 content: chunk,
                 embedding: embedding,
