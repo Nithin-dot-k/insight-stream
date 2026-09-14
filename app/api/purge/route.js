@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { purgeOrganizationDocuments } from '@/lib/services/documents';
 
 export async function DELETE() {
-    await supabase.from('documents').delete().neq('id', 0);
-    return NextResponse.json({ message: "Wiped" });
+    try {
+        const result = await purgeOrganizationDocuments();
+        return NextResponse.json(result);
+    } catch (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 }
